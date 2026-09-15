@@ -1,9 +1,10 @@
-import { initializeApp } from 'firebase/app'
-import { getAuth, GoogleAuthProvider } from 'firebase/auth'
+import { initializeApp, type FirebaseApp } from 'firebase/app'
+import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth'
 import {
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
+  type Firestore,
 } from 'firebase/firestore'
 
 const firebaseConfig = {
@@ -17,12 +18,27 @@ const firebaseConfig = {
 
 export const isFirebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId)
 
-export const app = initializeApp(firebaseConfig)
+// Only initialize when real config is present. With empty config Firebase throws
+// at startup, which would blank the whole app — instead we render the setup screen.
+let app: FirebaseApp | undefined
+let db: Firestore | undefined
+let auth: Auth | undefined
+let googleProvider: GoogleAuthProvider | undefined
 
-// Offline-first: persistent IndexedDB cache with multi-tab support.
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-})
+if (isFirebaseConfigured) {
+  app = initializeApp(firebaseConfig)
+  // Offline-first: persistent IndexedDB cache with multi-tab support.
+  db = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  })
+  auth = getAuth(app)
+  googleProvider = new GoogleAuthProvider()
+} else if (import.meta.env.PROD) {
+  // Surface the misconfiguration clearly in the console for production debugging.
+  console.error(
+    '[Organizer] Firebase is not configured. The VITE_FIREBASE_* environment ' +
+      'variables were empty at build time. Check your GitHub Actions repository secrets.',
+  )
+}
 
-export const auth = getAuth(app)
-export const googleProvider = new GoogleAuthProvider()
+export { app, db, auth, googleProvider }

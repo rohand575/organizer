@@ -22,7 +22,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!isFirebaseConfigured) {
+    if (!isFirebaseConfigured || !auth) {
       setLoading(false)
       return
     }
@@ -33,10 +33,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const signIn = async () => {
+    if (!auth || !googleProvider) return
     await signInWithPopup(auth, googleProvider)
   }
 
   const signOut = async () => {
+    if (!auth) return
     await fbSignOut(auth)
   }
 

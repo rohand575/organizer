@@ -27,6 +27,17 @@ jobs:
 
       - run: npm ci
 
+      - name: Verify Firebase secrets are present
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+        run: |
+          if [ -z "$VITE_FIREBASE_API_KEY" ] || [ -z "$VITE_FIREBASE_PROJECT_ID" ]; then
+            echo "::error::Firebase secrets are empty. Add VITE_FIREBASE_* under" \
+              "Settings → Secrets and variables → Actions → Repository secrets."
+            exit 1
+          fi
+
       - name: Build
         env:
           VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}

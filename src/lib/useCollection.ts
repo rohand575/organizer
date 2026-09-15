@@ -30,7 +30,7 @@ export function useCollection<T extends Doc>(path: string, ...constraints: Query
   const [loading, setLoading] = useState(true)
 
   const colRef = useMemo(
-    () => (user ? collection(db, 'users', user.uid, path) : null),
+    () => (user && db ? collection(db, 'users', user.uid, path) : null),
     [user, path],
   )
 
