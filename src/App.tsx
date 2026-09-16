@@ -1,12 +1,14 @@
+import { useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from './auth/AuthProvider'
 import { AppShell } from './components/AppShell'
 import { Login } from './routes/Login'
-import { TodosPage } from './features/todos/TodosPage'
+import { TasksPage } from './features/tasks/TasksPage'
 import { ListsPage } from './features/lists/ListsPage'
 import { NotesPage } from './features/notes/NotesPage'
+import { migrateTodosToTasks } from './lib/migrate'
 
 function Spinner() {
   return (
@@ -33,6 +35,11 @@ export default function App() {
   const { user, loading, configured } = useAuth()
   const location = useLocation()
 
+  // One-time copy of legacy `todos` docs into the renamed `tasks` collection.
+  useEffect(() => {
+    if (user) void migrateTodosToTasks(user.uid)
+  }, [user])
+
   if (loading) return <Spinner />
   if (!user || !configured) return <Login />
 
@@ -40,10 +47,9 @@ export default function App() {
     <AppShell>
       <AnimatePresence mode="wait">
         <Routes location={location} key={location.pathname}>
-          <Route path="/tasks" element={<Page><TodosPage /></Page>} />
+          <Route path="/tasks" element={<Page><TasksPage /></Page>} />
           <Route path="/lists" element={<Page><ListsPage /></Page>} />
           <Route path="/notes" element={<Page><NotesPage /></Page>} />
-          <Route path="/todos" element={<Navigate to="/tasks" replace />} />
           <Route path="*" element={<Navigate to="/tasks" replace />} />
         </Routes>
       </AnimatePresence>

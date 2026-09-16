@@ -4,7 +4,7 @@ import { IconButton } from '../../components/IconButton'
 import { CalendarIcon, ClockIcon, TrashIcon, XIcon } from '../../components/icons'
 import { createEvent, deleteEvent, isCalendarConnected, updateEvent } from '../../lib/calendar'
 import { calendarColorId, REMINDER_DURATION_MIN, TASK_COLORS } from '../../lib/commands'
-import type { Todo } from './TodosPage'
+import type { Task } from './TasksPage'
 
 // Firestore stores remindAt as a local ISO string (YYYY-MM-DDTHH:MM:SS).
 // <input type="datetime-local"> wants YYYY-MM-DDTHH:MM.
@@ -19,7 +19,7 @@ export function TaskEditor({
   onUpdate,
   onDelete,
 }: {
-  task: Todo
+  task: Task
   onClose: () => void
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<unknown>
   onDelete: () => void

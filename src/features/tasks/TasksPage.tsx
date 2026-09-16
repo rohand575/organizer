@@ -10,7 +10,7 @@ import { EmptyState } from '../../components/EmptyState'
 import { CheckCircleIcon, ClockIcon, TrashIcon } from '../../components/icons'
 import { TaskEditor } from './TaskEditor'
 
-export interface Todo extends Doc {
+export interface Task extends Doc {
   text: string
   done: boolean
   order: number
@@ -32,13 +32,13 @@ function formatReminder(iso: string): string {
 }
 
 export function TasksPage() {
-  const { docs, loading, add, update, remove } = useCollection<Todo>('todos', orderBy('order', 'asc'))
-  const [editing, setEditing] = useState<Todo | null>(null)
+  const { docs, loading, add, update, remove } = useCollection<Task>('tasks', orderBy('order', 'asc'))
+  const [editing, setEditing] = useState<Task | null>(null)
 
   const active = docs.filter((t) => !t.done)
   const done = docs.filter((t) => t.done)
 
-  const addTodo = (text: string) => {
+  const addTask = (text: string) => {
     const minOrder = docs.reduce((m, t) => Math.min(m, t.order ?? 0), 0)
     add({
       text,
@@ -51,23 +51,23 @@ export function TasksPage() {
   }
 
   // Deleting or completing a task also removes its calendar event (best-effort).
-  const deleteTask = (todo: Todo) => {
-    if (todo.calendarEventId) deleteEvent(todo.calendarEventId).catch(() => {})
-    remove(todo.id)
+  const deleteTask = (task: Task) => {
+    if (task.calendarEventId) deleteEvent(task.calendarEventId).catch(() => {})
+    remove(task.id)
   }
 
-  const toggleDone = (todo: Todo) => {
-    if (!todo.done && todo.calendarEventId) {
-      deleteEvent(todo.calendarEventId).catch(() => {})
-      update(todo.id, { done: true, calendarEventId: null })
+  const toggleDone = (task: Task) => {
+    if (!task.done && task.calendarEventId) {
+      deleteEvent(task.calendarEventId).catch(() => {})
+      update(task.id, { done: true, calendarEventId: null })
     } else {
-      update(todo.id, { done: !todo.done })
+      update(task.id, { done: !task.done })
     }
   }
 
   return (
     <div className="mx-auto max-w-2xl space-y-3">
-      <AddBar placeholder="Add a task…" onAdd={addTodo} />
+      <AddBar placeholder="Add a task…" onAdd={addTask} />
 
       {!loading && docs.length === 0 && (
         <EmptyState
@@ -79,13 +79,13 @@ export function TasksPage() {
 
       <div className="space-y-2">
         <AnimatePresence initial={false}>
-          {active.map((todo) => (
-            <TodoRow
-              key={todo.id}
-              todo={todo}
-              onEdit={() => setEditing(todo)}
-              onToggle={() => toggleDone(todo)}
-              onDelete={() => deleteTask(todo)}
+          {active.map((task) => (
+            <TaskRow
+              key={task.id}
+              task={task}
+              onEdit={() => setEditing(task)}
+              onToggle={() => toggleDone(task)}
+              onDelete={() => deleteTask(task)}
             />
           ))}
         </AnimatePresence>
@@ -98,13 +98,13 @@ export function TasksPage() {
           </div>
           <div className="space-y-2">
             <AnimatePresence initial={false}>
-              {done.map((todo) => (
-                <TodoRow
-                  key={todo.id}
-                  todo={todo}
-                  onEdit={() => setEditing(todo)}
-                  onToggle={() => update(todo.id, { done: !todo.done })}
-                  onDelete={() => remove(todo.id)}
+              {done.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  onEdit={() => setEditing(task)}
+                  onToggle={() => update(task.id, { done: !task.done })}
+                  onDelete={() => remove(task.id)}
                 />
               ))}
             </AnimatePresence>
@@ -129,13 +129,13 @@ export function TasksPage() {
   )
 }
 
-function TodoRow({
-  todo,
+function TaskRow({
+  task,
   onEdit,
   onToggle,
   onDelete,
 }: {
-  todo: Todo
+  task: Task
   onEdit: () => void
   onToggle: () => void
   onDelete: () => void
@@ -149,19 +149,19 @@ function TodoRow({
       transition={{ type: 'spring', stiffness: 400, damping: 34 }}
       className="card group flex items-center gap-3 px-4 py-3"
     >
-      <Checkbox checked={todo.done} accent={todo.color} onChange={onToggle} />
+      <Checkbox checked={task.done} accent={task.color} onChange={onToggle} />
       <button onClick={onEdit} className="min-w-0 flex-1 text-left">
         <span
           className={`block truncate text-[15px] transition-colors ${
-            todo.done ? 'text-subtle line-through' : 'text-ink'
+            task.done ? 'text-subtle line-through' : 'text-ink'
           }`}
         >
-          {todo.text}
+          {task.text}
         </span>
-        {todo.remindAt && !todo.done && (
+        {task.remindAt && !task.done && (
           <span className="mt-0.5 flex items-center gap-1 text-xs text-subtle">
             <ClockIcon className="h-3.5 w-3.5" />
-            {formatReminder(todo.remindAt)}
+            {formatReminder(task.remindAt)}
           </span>
         )}
       </button>
@@ -171,6 +171,3 @@ function TodoRow({
     </motion.div>
   )
 }
-
-// Keep the existing route import name working after the Tasks rename.
-export const TodosPage = TasksPage

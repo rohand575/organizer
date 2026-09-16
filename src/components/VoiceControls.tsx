@@ -11,7 +11,7 @@ import { MicIcon } from './icons'
 type Phase = 'idle' | 'working' | 'done' | 'error'
 
 const SECTION_BY_PATH: Record<string, Section> = {
-  '/tasks': 'todos',
+  '/tasks': 'tasks',
   '/lists': 'lists',
   '/notes': 'notes',
 }
@@ -70,7 +70,7 @@ export function useVoiceCommand() {
         if (!transcript) return flash('error', "Didn't catch that — try again.")
         flash('working', 'Thinking…')
         const lists = await listsPromise
-        const section = SECTION_BY_PATH[pathname] ?? 'todos'
+        const section = SECTION_BY_PATH[pathname] ?? 'tasks'
         const actions = await interpret({
           transcript,
           section,

@@ -3,10 +3,19 @@
  * document shapes the pages use (order, colors, defaults). Writes go straight
  * through the SDK using the signed-in user's uid.
  */
-import { addDoc, collection, doc, getDocs, serverTimestamp, setDoc } from 'firebase/firestore'
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from 'firebase/firestore'
 import { db } from './firebase'
 import type { Action } from './intent'
-import { createEvent, isCalendarConnected } from './calendar'
+import { createEvent, deleteEvent, isCalendarConnected, updateEvent } from './calendar'
 
 const LIST_COLORS = ['#0A84FF', '#34C759', '#FF9500', '#FF375F', '#AF52DE', '#5AC8FA']
 
@@ -94,8 +103,150 @@ function matchList(lists: ListRef[], name: string): ListRef | undefined {
   )
 }
 
-async function addTodos(uid: string, tasks: NewTask[]) {
-  const col = collection(db!, 'users', uid, 'todos')
+// Looser normalization for free-text items/tasks: keep word boundaries so
+// spoken phrases match stored text on exact-or-contains.
+const normText = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+
+/** Best fuzzy match of a spoken phrase against a set of text-bearing docs. */
+function bestMatch<T extends { text: string }>(items: T[], spoken: string): T | undefined {
+  const target = normText(spoken)
+  if (!target) return undefined
+  return (
+    items.find((i) => normText(i.text) === target) ??
+    items.find((i) => normText(i.text).includes(target) || target.includes(normText(i.text)))
+  )
+}
+
+interface TaskRef {
+  id: string
+  text: string
+  done: boolean
+  color?: string
+  calendarEventId: string | null
+}
+
+interface ItemRef {
+  id: string
+  text: string
+  checked: boolean
+}
+
+/** Read current tasks for matching change requests. Bounded like loadLists. */
+async function loadTasks(uid: string): Promise<TaskRef[]> {
+  if (!db) return []
+  try {
+    const snap = await Promise.race([
+      getDocs(collection(db, 'users', uid, 'tasks')),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+    ])
+    if (!snap) return []
+    return snap.docs.map((d) => {
+      const data = d.data() as {
+        text?: unknown
+        done?: unknown
+        color?: unknown
+        calendarEventId?: unknown
+      }
+      return {
+        id: d.id,
+        text: String(data.text ?? ''),
+        done: Boolean(data.done),
+        color: typeof data.color === 'string' ? data.color : undefined,
+        calendarEventId: typeof data.calendarEventId === 'string' ? data.calendarEventId : null,
+      }
+    })
+  } catch {
+    return []
+  }
+}
+
+/** Read the items of one list, for check/remove matching. */
+async function loadListItems(uid: string, listId: string): Promise<ItemRef[]> {
+  if (!db) return []
+  try {
+    const snap = await Promise.race([
+      getDocs(collection(db, 'users', uid, 'lists', listId, 'items')),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+    ])
+    if (!snap) return []
+    return snap.docs.map((d) => {
+      const data = d.data() as { text?: unknown; checked?: unknown }
+      return { id: d.id, text: String(data.text ?? ''), checked: Boolean(data.checked) }
+    })
+  } catch {
+    return []
+  }
+}
+
+async function completeTaskDoc(uid: string, t: TaskRef) {
+  if (t.calendarEventId) deleteEvent(t.calendarEventId).catch(() => {})
+  await committed(
+    updateDoc(doc(db!, 'users', uid, 'tasks', t.id), { done: true, calendarEventId: null }),
+  )
+}
+
+async function deleteTaskDoc(uid: string, t: TaskRef) {
+  if (t.calendarEventId) deleteEvent(t.calendarEventId).catch(() => {})
+  await committed(deleteDoc(doc(db!, 'users', uid, 'tasks', t.id)))
+}
+
+async function updateTaskDoc(
+  uid: string,
+  t: TaskRef,
+  patch: { newText?: string; remindAt?: string | null },
+) {
+  const data: Record<string, unknown> = {}
+  if (patch.newText) data.text = patch.newText
+
+  if (patch.remindAt !== undefined) {
+    data.remindAt = patch.remindAt
+    let calendarEventId = t.calendarEventId
+    if (isCalendarConnected()) {
+      try {
+        if (patch.remindAt) {
+          const payload = {
+            summary: patch.newText ?? t.text,
+            startISO: patch.remindAt,
+            durationMin: REMINDER_DURATION_MIN,
+            timeZone: TZ,
+            colorId: calendarColorId(t.color),
+          }
+          if (calendarEventId) {
+            const ok = await updateEvent(calendarEventId, payload)
+            if (!ok) calendarEventId = await createEvent(payload)
+          } else {
+            calendarEventId = await createEvent(payload)
+          }
+        } else if (calendarEventId) {
+          await deleteEvent(calendarEventId)
+          calendarEventId = null
+        }
+      } catch {
+        // Non-fatal — update the task regardless of calendar sync.
+      }
+    }
+    data.calendarEventId = calendarEventId
+  }
+
+  await committed(updateDoc(doc(db!, 'users', uid, 'tasks', t.id), data))
+}
+
+async function setListItemsChecked(uid: string, listId: string, ids: string[], checked: boolean) {
+  await committed(
+    Promise.all(
+      ids.map((id) => updateDoc(doc(db!, 'users', uid, 'lists', listId, 'items', id), { checked })),
+    ),
+  )
+}
+
+async function deleteListItemDocs(uid: string, listId: string, ids: string[]) {
+  await committed(
+    Promise.all(ids.map((id) => deleteDoc(doc(db!, 'users', uid, 'lists', listId, 'items', id)))),
+  )
+}
+
+async function addTasks(uid: string, tasks: NewTask[]) {
+  const col = collection(db!, 'users', uid, 'tasks')
   // Time-based order (negative → newest on top) avoids a blocking read of the
   // whole collection, which can hang on flaky connections.
   const base = Date.now()
@@ -193,42 +344,120 @@ export async function executeActions(
   if (!db) return { summary: 'Not connected.', ok: false }
 
   const lists = [...knownLists]
-  const parts: string[] = []
+  const done: string[] = [] // success phrases, each begins with a verb
+  const missed: string[] = [] // targets we couldn't find
   const newTasks: NewTask[] = []
 
+  // Current tasks are read once and only if a change (complete/delete/update) is
+  // requested. Matched tasks are removed from the cache so two commands in the
+  // same utterance don't both resolve to the same doc.
+  let taskCache: TaskRef[] | null = null
+  const takeTask = async (spoken: string, preferActive: boolean): Promise<TaskRef | undefined> => {
+    taskCache ??= await loadTasks(uid)
+    const pool = preferActive ? taskCache.filter((t) => !t.done) : taskCache
+    const found = bestMatch(pool, spoken) ?? bestMatch(taskCache, spoken)
+    if (found) taskCache = taskCache.filter((t) => t.id !== found.id)
+    return found
+  }
+
   for (const action of actions) {
-    if (action.type === 'add_todo') {
-      newTasks.push({ text: action.text, remindAt: action.remindAt })
-    } else if (action.type === 'add_list_items') {
-      let list = matchList(lists, action.list)
-      if (!list) {
-        list = await createList(uid, action.list)
-        lists.push(list)
+    switch (action.type) {
+      case 'add_task':
+        newTasks.push({ text: action.text, remindAt: action.remindAt })
+        break
+
+      case 'complete_task': {
+        const t = await takeTask(action.text, true)
+        if (t) {
+          await completeTaskDoc(uid, t)
+          done.push(`completed “${t.text}”`)
+        } else missed.push(`“${action.text}”`)
+        break
       }
-      await addListItems(uid, list.id, action.items)
-      parts.push(
-        `${action.items.length} item${action.items.length > 1 ? 's' : ''} to ${list.title}`,
-      )
-    } else if (action.type === 'add_note') {
-      await addNote(uid, action.title, action.body)
-      parts.push(`note${action.title ? ` “${action.title}”` : ''}`)
+
+      case 'delete_task': {
+        const t = await takeTask(action.text, false)
+        if (t) {
+          await deleteTaskDoc(uid, t)
+          done.push(`deleted “${t.text}”`)
+        } else missed.push(`“${action.text}”`)
+        break
+      }
+
+      case 'update_task': {
+        const t = await takeTask(action.text, false)
+        if (t) {
+          await updateTaskDoc(uid, t, { newText: action.newText, remindAt: action.remindAt })
+          done.push(`updated “${action.newText ?? t.text}”`)
+        } else missed.push(`“${action.text}”`)
+        break
+      }
+
+      case 'add_list_items': {
+        let list = matchList(lists, action.list)
+        if (!list) {
+          list = await createList(uid, action.list)
+          lists.push(list)
+        }
+        await addListItems(uid, list.id, action.items)
+        done.push(`added ${action.items.length} item${action.items.length > 1 ? 's' : ''} to ${list.title}`)
+        break
+      }
+
+      case 'check_list_items':
+      case 'delete_list_items': {
+        const list = matchList(lists, action.list)
+        if (!list) {
+          missed.push(`${action.list} list`)
+          break
+        }
+        const items = await loadListItems(uid, list.id)
+        const ids = [
+          ...new Set(
+            action.items
+              .map((name) => bestMatch(items, name)?.id)
+              .filter((id): id is string => Boolean(id)),
+          ),
+        ]
+        if (!ids.length) {
+          missed.push(`those items in ${list.title}`)
+          break
+        }
+        if (action.type === 'check_list_items') {
+          await setListItemsChecked(uid, list.id, ids, true)
+          done.push(`checked ${ids.length} in ${list.title}`)
+        } else {
+          await deleteListItemDocs(uid, list.id, ids)
+          done.push(`removed ${ids.length} from ${list.title}`)
+        }
+        break
+      }
+
+      case 'add_note':
+        await addNote(uid, action.title, action.body)
+        done.push(`added note${action.title ? ` “${action.title}”` : ''}`)
+        break
     }
   }
 
   if (newTasks.length) {
-    await addTodos(uid, newTasks)
+    await addTasks(uid, newTasks)
     const withReminder = newTasks.filter((t) => t.remindAt).length
-    let label = `${newTasks.length} task${newTasks.length > 1 ? 's' : ''}`
+    let label = `added ${newTasks.length} task${newTasks.length > 1 ? 's' : ''}`
     if (withReminder) label += isCalendarConnected() ? ' + calendar' : ' (reminder)'
-    parts.unshift(label)
+    done.unshift(label)
   }
 
-  if (parts.length === 0) {
+  if (done.length === 0) {
+    if (missed.length) return { summary: `Couldn't find ${missed.join(', ')}`, ok: false }
     const unknown = actions.find((a) => a.type === 'unknown') as
       | { type: 'unknown'; reason?: string }
       | undefined
     return { summary: unknown?.reason || "Didn't catch an action.", ok: false }
   }
 
-  return { summary: `Added ${parts.join(' · ')}`, ok: true }
+  let summary = done.join(' · ')
+  summary = summary.charAt(0).toUpperCase() + summary.slice(1)
+  if (missed.length) summary += ` · couldn't find ${missed.join(', ')}`
+  return { summary, ok: true }
 }

@@ -59,7 +59,7 @@ firebase deploy --only firestore:rules --project <your-project-id>
 ### Data model
 
 ```
-users/{uid}/todos/{id}                 { text, done, order, createdAt }
+users/{uid}/tasks/{id}                  { text, done, order, color, remindAt, calendarEventId, createdAt }
 users/{uid}/lists/{id}                  { title, color, expanded, order, createdAt }
 users/{uid}/lists/{id}/items/{itemId}   { text, checked, order }
 users/{uid}/notes/{id}                  { title, body, color, pinned, updatedAt }
