@@ -3,7 +3,7 @@
  * document shapes the pages use (order, colors, defaults). Writes go straight
  * through the SDK using the signed-in user's uid.
  */
-import { addDoc, collection, getDocs, serverTimestamp } from 'firebase/firestore'
+import { addDoc, collection, doc, getDocs, serverTimestamp, setDoc } from 'firebase/firestore'
 import { db } from './firebase'
 import type { Action } from './intent'
 import { createEvent, isCalendarConnected } from './calendar'
@@ -52,6 +52,19 @@ export interface ListRef {
 }
 
 /**
+ * Resolve when a Firestore write is applied locally, without blocking on the
+ * server acknowledgement — that ack can stall on flaky connections while the
+ * write is already safe in the offline cache and will sync later.
+ */
+function committed(p: Promise<unknown>, ms = 4000): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => resolve()
+    p.then(done, done)
+    setTimeout(done, ms)
+  })
+}
+
+/**
  * Read the user's list titles (for intent context + local matching). Bounded by
  * an 8s timeout — on some mobile browsers a Firestore read can stall, and this
  * must never block the voice pipeline. Falls back to an empty list.
@@ -61,7 +74,7 @@ export async function loadLists(uid: string): Promise<ListRef[]> {
   try {
     const snap = await Promise.race([
       getDocs(collection(db, 'users', uid, 'lists')),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
     ])
     if (!snap) return []
     return snap.docs.map((d) => ({ id: d.id, title: String((d.data() as { title?: unknown }).title ?? '') }))
@@ -103,15 +116,17 @@ async function addTodos(uid: string, tasks: NewTask[]) {
         // Non-fatal: the task is still saved without a calendar event.
       }
     }
-    await addDoc(col, {
-      text: task.text,
-      done: false,
-      order: i - base, // earlier tasks sort above later ones, all above existing
-      color,
-      remindAt: task.remindAt ?? null,
-      calendarEventId,
-      createdAt: serverTimestamp(),
-    })
+    await committed(
+      addDoc(col, {
+        text: task.text,
+        done: false,
+        order: i - base, // earlier tasks sort above later ones, all above existing
+        color,
+        remindAt: task.remindAt ?? null,
+        calendarEventId,
+        createdAt: serverTimestamp(),
+      }),
+    )
     i += 1
   }
 }
@@ -121,13 +136,17 @@ let listColorSeed = Date.now()
 async function createList(uid: string, title: string): Promise<ListRef> {
   const col = collection(db!, 'users', uid, 'lists')
   const color = LIST_COLORS[listColorSeed++ % LIST_COLORS.length]
-  const ref = await addDoc(col, {
-    title,
-    color,
-    order: -Date.now(), // newest on top, no collection read needed
-    expanded: true,
-    createdAt: serverTimestamp(),
-  })
+  // Generate the id locally so we don't block on the server for the new list.
+  const ref = doc(col)
+  await committed(
+    setDoc(ref, {
+      title,
+      color,
+      order: -Date.now(), // newest on top, no collection read needed
+      expanded: true,
+      createdAt: serverTimestamp(),
+    }),
+  )
   return { id: ref.id, title }
 }
 
@@ -135,23 +154,25 @@ async function addListItems(uid: string, listId: string, items: string[]) {
   const col = collection(db!, 'users', uid, 'lists', listId, 'items')
   // Positive, increasing order → items append at the bottom, no read required.
   const base = Date.now()
-  let i = 0
-  for (const text of items) {
-    await addDoc(col, { text, checked: false, order: base + i, createdAt: serverTimestamp() })
-    i += 1
-  }
+  await committed(
+    Promise.all(
+      items.map((text, i) => addDoc(col, { text, checked: false, order: base + i, createdAt: serverTimestamp() })),
+    ),
+  )
 }
 
 async function addNote(uid: string, title: string, body: string) {
   const col = collection(db!, 'users', uid, 'notes')
-  await addDoc(col, {
-    title,
-    body,
-    color: '#FFFFFF',
-    pinned: false,
-    updatedAt: serverTimestamp(),
-    createdAt: serverTimestamp(),
-  })
+  await committed(
+    addDoc(col, {
+      title,
+      body,
+      color: '#FFFFFF',
+      pinned: false,
+      updatedAt: serverTimestamp(),
+      createdAt: serverTimestamp(),
+    }),
+  )
 }
 
 export interface ExecResult {
