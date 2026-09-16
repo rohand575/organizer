@@ -195,40 +195,42 @@ async function updateTaskDoc(
   t: TaskRef,
   patch: { newText?: string; remindAt?: string | null },
 ) {
+  const ref = doc(db!, 'users', uid, 'tasks', t.id)
+
+  // Write the core change (text/time) first — never gated on the calendar call.
   const data: Record<string, unknown> = {}
   if (patch.newText) data.text = patch.newText
+  if (patch.remindAt !== undefined) data.remindAt = patch.remindAt
+  await committed(updateDoc(ref, data))
 
-  if (patch.remindAt !== undefined) {
-    data.remindAt = patch.remindAt
+  // Sync the calendar in the background and patch the event id afterward.
+  if (patch.remindAt === undefined || !isCalendarConnected()) return
+  void (async () => {
     let calendarEventId = t.calendarEventId
-    if (isCalendarConnected()) {
-      try {
-        if (patch.remindAt) {
-          const payload = {
-            summary: patch.newText ?? t.text,
-            startISO: patch.remindAt,
-            durationMin: REMINDER_DURATION_MIN,
-            timeZone: TZ,
-            colorId: calendarColorId(t.color),
-          }
-          if (calendarEventId) {
-            const ok = await updateEvent(calendarEventId, payload)
-            if (!ok) calendarEventId = await createEvent(payload)
-          } else {
-            calendarEventId = await createEvent(payload)
-          }
-        } else if (calendarEventId) {
-          await deleteEvent(calendarEventId)
-          calendarEventId = null
+    try {
+      if (patch.remindAt) {
+        const payload = {
+          summary: patch.newText ?? t.text,
+          startISO: patch.remindAt,
+          durationMin: REMINDER_DURATION_MIN,
+          timeZone: TZ,
+          colorId: calendarColorId(t.color),
         }
-      } catch {
-        // Non-fatal — update the task regardless of calendar sync.
+        if (calendarEventId) {
+          const ok = await updateEvent(calendarEventId, payload)
+          if (!ok) calendarEventId = await createEvent(payload)
+        } else {
+          calendarEventId = await createEvent(payload)
+        }
+      } else if (calendarEventId) {
+        await deleteEvent(calendarEventId)
+        calendarEventId = null
       }
+      if (calendarEventId !== t.calendarEventId) await updateDoc(ref, { calendarEventId })
+    } catch {
+      // Non-fatal — the task's text/time change already saved.
     }
-    data.calendarEventId = calendarEventId
-  }
-
-  await committed(updateDoc(doc(db!, 'users', uid, 'tasks', t.id), data))
+  })()
 }
 
 async function setListItemsChecked(uid: string, listId: string, ids: string[], checked: boolean) {
@@ -245,45 +247,71 @@ async function deleteListItemDocs(uid: string, listId: string, ids: string[]) {
   )
 }
 
-async function addTasks(uid: string, tasks: NewTask[]) {
+/**
+ * Save tasks and return whether the write itself succeeded. The calendar event
+ * is attached AFTER the task is written, never before.
+ *
+ * The previous version awaited a slow Google Calendar call before addDoc, all
+ * inside committed()'s 4s cap. On iOS the cap would fire and report success while
+ * the task write was still queued behind the calendar call — so "Added 1 task +
+ * calendar" showed but nothing was ever written (worse if the PWA got suspended
+ * mid-call). Now the task write is the only thing gating success; the calendar is
+ * best-effort and patched in afterward.
+ */
+async function addTasks(uid: string, tasks: NewTask[]): Promise<boolean> {
   const col = collection(db!, 'users', uid, 'tasks')
   // Time-based order (negative → newest on top) avoids a blocking read of the
   // whole collection, which can hang on flaky connections.
   const base = Date.now()
-  // Write all tasks concurrently, not one-at-a-time: on iOS's forced long-polling
-  // transport a write ack can stall up to `committed`'s cap, and a sequential loop
-  // would pay that cost per task (N×). One parallel batch caps the whole write at
-  // a single timeout — instant on a healthy connection, bounded on a bad one.
+  // Client-generated ids so we can patch each task with its calendar event later.
+  const created = tasks.map((task, i) => ({
+    ref: doc(col),
+    task,
+    color: randomTaskColor(),
+    order: i - base, // earlier tasks sort above later ones, all above existing
+  }))
+
+  // Write the tasks first, concurrently. This applies to the local cache
+  // immediately so they appear at once and the success we report is real.
+  let ok = true
   await committed(
     Promise.all(
-      tasks.map(async (task, i) => {
-        const color = randomTaskColor()
-        let calendarEventId: string | null = null
-        if (task.remindAt && isCalendarConnected()) {
-          try {
-            calendarEventId = await createEvent({
-              summary: task.text,
-              startISO: task.remindAt,
-              durationMin: REMINDER_DURATION_MIN,
-              timeZone: TZ,
-              colorId: calendarColorId(color),
-            })
-          } catch {
-            // Non-fatal: the task is still saved without a calendar event.
-          }
-        }
-        return addDoc(col, {
+      created.map(({ ref, task, color, order }) =>
+        setDoc(ref, {
           text: task.text,
           done: false,
-          order: i - base, // earlier tasks sort above later ones, all above existing
+          order,
           color,
           remindAt: task.remindAt ?? null,
-          calendarEventId,
+          calendarEventId: null,
           createdAt: serverTimestamp(),
-        })
-      }),
-    ),
+        }),
+      ),
+    ).catch(() => {
+      ok = false
+    }),
   )
+
+  // Best-effort calendar sync, never awaited: attach the event id when Google
+  // responds and patch the task. A failure here never affects the saved task.
+  if (isCalendarConnected()) {
+    for (const { ref, task, color } of created) {
+      if (!task.remindAt) continue
+      void createEvent({
+        summary: task.text,
+        startISO: task.remindAt,
+        durationMin: REMINDER_DURATION_MIN,
+        timeZone: TZ,
+        colorId: calendarColorId(color),
+      })
+        .then((id) => (id ? updateDoc(ref, { calendarEventId: id }) : undefined))
+        .catch(() => {
+          /* keep the reminder without a calendar event */
+        })
+    }
+  }
+
+  return ok
 }
 
 let listColorSeed = Date.now()
@@ -346,6 +374,7 @@ export async function executeActions(
   const lists = [...knownLists]
   const done: string[] = [] // success phrases, each begins with a verb
   const missed: string[] = [] // targets we couldn't find
+  const failed: string[] = [] // writes that actually errored
   const newTasks: NewTask[] = []
 
   // Current tasks are read once and only if a change (complete/delete/update) is
@@ -441,14 +470,20 @@ export async function executeActions(
   }
 
   if (newTasks.length) {
-    await addTasks(uid, newTasks)
-    const withReminder = newTasks.filter((t) => t.remindAt).length
-    let label = `added ${newTasks.length} task${newTasks.length > 1 ? 's' : ''}`
-    if (withReminder) label += isCalendarConnected() ? ' + calendar' : ' (reminder)'
-    done.unshift(label)
+    const n = newTasks.length
+    const saved = await addTasks(uid, newTasks)
+    if (saved) {
+      const withReminder = newTasks.filter((t) => t.remindAt).length
+      let label = `added ${n} task${n > 1 ? 's' : ''}`
+      if (withReminder) label += isCalendarConnected() ? ' + calendar' : ' (reminder)'
+      done.unshift(label)
+    } else {
+      failed.unshift(`couldn't save ${n} task${n > 1 ? 's' : ''}`)
+    }
   }
 
   if (done.length === 0) {
+    if (failed.length) return { summary: capitalize(failed.join(' · ')), ok: false }
     if (missed.length) return { summary: `Couldn't find ${missed.join(', ')}`, ok: false }
     const unknown = actions.find((a) => a.type === 'unknown') as
       | { type: 'unknown'; reason?: string }
@@ -457,7 +492,9 @@ export async function executeActions(
   }
 
   let summary = done.join(' · ')
-  summary = summary.charAt(0).toUpperCase() + summary.slice(1)
   if (missed.length) summary += ` · couldn't find ${missed.join(', ')}`
-  return { summary, ok: true }
+  if (failed.length) summary += ` · ${failed.join(' · ')}`
+  return { summary: capitalize(summary), ok: failed.length === 0 }
 }
+
+const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
