@@ -7,6 +7,8 @@
  * Calendar API enabled on that project.
  */
 
+import { fetchWithTimeout } from './stt'
+
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID
 const SCOPE = 'https://www.googleapis.com/auth/calendar.events'
 const GIS_SRC = 'https://accounts.google.com/gsi/client'
@@ -153,11 +155,15 @@ export async function createEvent(input: CalendarEventInput): Promise<string | n
     end: { dateTime: endISO, timeZone: input.timeZone },
     ...(input.colorId ? { colorId: input.colorId } : {}),
   }
-  const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+  const res = await fetchWithTimeout(
+    'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    15_000,
+  )
   if (!res.ok) throw new Error(`Calendar create failed (${res.status})`)
   const json = (await res.json()) as { id?: string }
   return json.id ?? null
@@ -166,10 +172,11 @@ export async function createEvent(input: CalendarEventInput): Promise<string | n
 export async function deleteEvent(eventId: string): Promise<void> {
   const token = await getAccessToken()
   if (!token) return
-  await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  await fetchWithTimeout(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+    { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } },
+    15_000,
+  )
 }
 
 /** Update an existing event's summary/start (returns false if not connected). */
@@ -183,13 +190,14 @@ export async function updateEvent(eventId: string, input: CalendarEventInput): P
     end: { dateTime: endISO, timeZone: input.timeZone },
     ...(input.colorId ? { colorId: input.colorId } : {}),
   }
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
     {
       method: 'PATCH',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     },
+    15_000,
   )
   return res.ok
 }

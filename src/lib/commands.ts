@@ -99,36 +99,40 @@ async function addTodos(uid: string, tasks: NewTask[]) {
   // Time-based order (negative → newest on top) avoids a blocking read of the
   // whole collection, which can hang on flaky connections.
   const base = Date.now()
-  let i = 0
-  for (const task of tasks) {
-    const color = randomTaskColor()
-    let calendarEventId: string | null = null
-    if (task.remindAt && isCalendarConnected()) {
-      try {
-        calendarEventId = await createEvent({
-          summary: task.text,
-          startISO: task.remindAt,
-          durationMin: REMINDER_DURATION_MIN,
-          timeZone: TZ,
-          colorId: calendarColorId(color),
+  // Write all tasks concurrently, not one-at-a-time: on iOS's forced long-polling
+  // transport a write ack can stall up to `committed`'s cap, and a sequential loop
+  // would pay that cost per task (N×). One parallel batch caps the whole write at
+  // a single timeout — instant on a healthy connection, bounded on a bad one.
+  await committed(
+    Promise.all(
+      tasks.map(async (task, i) => {
+        const color = randomTaskColor()
+        let calendarEventId: string | null = null
+        if (task.remindAt && isCalendarConnected()) {
+          try {
+            calendarEventId = await createEvent({
+              summary: task.text,
+              startISO: task.remindAt,
+              durationMin: REMINDER_DURATION_MIN,
+              timeZone: TZ,
+              colorId: calendarColorId(color),
+            })
+          } catch {
+            // Non-fatal: the task is still saved without a calendar event.
+          }
+        }
+        return addDoc(col, {
+          text: task.text,
+          done: false,
+          order: i - base, // earlier tasks sort above later ones, all above existing
+          color,
+          remindAt: task.remindAt ?? null,
+          calendarEventId,
+          createdAt: serverTimestamp(),
         })
-      } catch {
-        // Non-fatal: the task is still saved without a calendar event.
-      }
-    }
-    await committed(
-      addDoc(col, {
-        text: task.text,
-        done: false,
-        order: i - base, // earlier tasks sort above later ones, all above existing
-        color,
-        remindAt: task.remindAt ?? null,
-        calendarEventId,
-        createdAt: serverTimestamp(),
       }),
-    )
-    i += 1
-  }
+    ),
+  )
 }
 
 let listColorSeed = Date.now()
