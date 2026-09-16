@@ -62,11 +62,14 @@ export function useVoiceCommand() {
   const onResult = useCallback(
     async (blob: Blob) => {
       if (!user) return
-      flash('working', 'Listening…')
+      flash('working', 'Transcribing…')
       try {
-        const lists = await loadLists(user.uid)
+        // Read lists in parallel with transcription — neither needs the other.
+        const listsPromise = loadLists(user.uid)
         const transcript = await transcribe(blob)
         if (!transcript) return flash('error', "Didn't catch that — try again.")
+        flash('working', 'Thinking…')
+        const lists = await listsPromise
         const section = SECTION_BY_PATH[pathname] ?? 'todos'
         const actions = await interpret({
           transcript,
@@ -143,7 +146,7 @@ export function VoiceFab({ voice }: { voice: VoiceCommand }) {
  * recording/processing states are conveyed by the mic button's own animation.
  */
 export function VoiceToast({ voice }: { voice: VoiceCommand }) {
-  const show = voice.phase === 'done' || voice.phase === 'error'
+  const show = voice.working || voice.phase === 'done' || voice.phase === 'error'
   return (
     <AnimatePresence>
       {show && (
@@ -154,10 +157,13 @@ export function VoiceToast({ voice }: { voice: VoiceCommand }) {
           className="fixed left-1/2 z-40 w-max max-w-[calc(100vw-2.5rem)] -translate-x-1/2 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-8"
         >
           <div
-            className={`card px-4 py-2.5 text-sm font-medium ${
+            className={`card flex items-center gap-2 px-4 py-2.5 text-sm font-medium ${
               voice.phase === 'error' ? 'text-[#FF375F]' : 'text-ink'
             }`}
           >
+            {voice.working && (
+              <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-hair border-t-accent" />
+            )}
             <span className="truncate">{voice.message}</span>
           </div>
         </motion.div>

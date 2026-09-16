@@ -70,7 +70,7 @@ async function transcribeWith(provider: Provider, blob: Blob): Promise<string> {
     res = await fetchWithTimeout(
       url,
       { method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form },
-      45_000,
+      30_000,
     )
   } catch (e) {
     const aborted = (e as Error).name === 'AbortError'

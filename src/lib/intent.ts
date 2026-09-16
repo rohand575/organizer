@@ -61,7 +61,7 @@ async function chatWith(
           messages,
         }),
       },
-      30_000,
+      20_000,
     )
   } catch (e) {
     const aborted = (e as Error).name === 'AbortError'

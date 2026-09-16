@@ -67,7 +67,11 @@ export function useHoldToTalk(opts: HoldToTalkOptions): {
     if (cfg.current.disabled || recorderRef.current) return
     let stream: MediaStream
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream = await navigator.mediaDevices.getUserMedia({
+        // Mono + noise handling keeps the upload small and speech-clean, which
+        // matters a lot on mobile connections.
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      })
     } catch {
       cfg.current.onMicBlocked?.()
       return
@@ -75,7 +79,10 @@ export function useHoldToTalk(opts: HoldToTalkOptions): {
     streamRef.current = stream
     chunksRef.current = []
     const mimeType = pickMimeType()
-    const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+    const rec = new MediaRecorder(stream, {
+      ...(mimeType ? { mimeType } : {}),
+      audioBitsPerSecond: 32_000, // ~4 KB/s — plenty for speech, tiny to upload
+    })
     rec.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data)
     }
