@@ -112,17 +112,25 @@ export function VoiceFab({ voice }: { voice: VoiceCommand }) {
     <button
       aria-label="Hold to talk"
       disabled={voice.working}
-      style={{ touchAction: 'none' }}
+      draggable={false}
+      style={{
+        touchAction: 'none',
+        WebkitUserSelect: 'none',
+        userSelect: 'none',
+        WebkitTouchCallout: 'none',
+      }}
       {...voice.bind}
-      className={`press fixed bottom-24 right-5 z-40 grid h-[52px] w-[52px] place-items-center rounded-full border border-white/10 text-white shadow-float backdrop-blur-xl transition-colors md:bottom-8 ${
-        voice.recording ? 'bg-[#FF375F]/90' : 'bg-ink/80 hover:bg-ink/90'
+      className={`press fixed right-5 z-40 grid h-[54px] w-[54px] select-none place-items-center rounded-full border shadow-float backdrop-blur-xl transition-colors bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-8 ${
+        voice.recording
+          ? 'border-transparent bg-[#FF375F] text-white'
+          : 'border-black/[0.06] bg-white/60 text-ink hover:bg-white/80'
       }`}
     >
       {voice.recording && (
         <span className="pointer-events-none absolute inset-0 animate-ping rounded-full bg-[#FF375F]/30" />
       )}
       {voice.working ? (
-        <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+        <span className="h-5 w-5 animate-spin rounded-full border-2 border-ink/20 border-t-ink" />
       ) : (
         <MicIcon className="h-6 w-6" />
       )}
@@ -143,7 +151,7 @@ export function VoiceToast({ voice }: { voice: VoiceCommand }) {
           initial={{ opacity: 0, y: 8, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 8, scale: 0.96 }}
-          className="fixed bottom-24 left-1/2 z-40 w-max max-w-[calc(100vw-2.5rem)] -translate-x-1/2 md:bottom-8"
+          className="fixed left-1/2 z-40 w-max max-w-[calc(100vw-2.5rem)] -translate-x-1/2 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-8"
         >
           <div
             className={`card px-4 py-2.5 text-sm font-medium ${

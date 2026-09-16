@@ -61,7 +61,7 @@ export function NotesPage() {
       <button
         onClick={() => setEditing('new')}
         aria-label="New note"
-        className="press fixed bottom-24 right-5 z-30 grid h-14 w-14 place-items-center rounded-2xl bg-accent text-white shadow-float md:bottom-8"
+        className="press fixed right-5 z-30 grid h-14 w-14 place-items-center rounded-2xl bg-accent text-white shadow-float bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-8"
       >
         <PlusIcon className="h-7 w-7" />
       </button>

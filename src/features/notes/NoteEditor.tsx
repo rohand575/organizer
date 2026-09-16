@@ -137,9 +137,15 @@ export function NoteEditor({
             <button
               aria-label="Hold to dictate"
               disabled={dictation === 'working'}
-              style={{ touchAction: 'none' }}
+              draggable={false}
+              style={{
+                touchAction: 'none',
+                WebkitUserSelect: 'none',
+                userSelect: 'none',
+                WebkitTouchCallout: 'none',
+              }}
               {...bind}
-              className={`press relative grid h-9 w-9 shrink-0 place-items-center rounded-full transition-colors ${
+              className={`press relative grid h-9 w-9 shrink-0 select-none place-items-center rounded-full transition-colors ${
                 recording ? 'bg-[#FF375F] text-white' : 'text-subtle hover:text-accent'
               }`}
             >
