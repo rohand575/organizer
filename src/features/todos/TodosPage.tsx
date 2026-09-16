@@ -1,29 +1,68 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { orderBy, useCollection, type Doc } from '../../lib/useCollection'
+import { randomTaskColor } from '../../lib/commands'
+import { deleteEvent } from '../../lib/calendar'
 import { Checkbox } from '../../components/Checkbox'
 import { IconButton } from '../../components/IconButton'
 import { AddBar } from '../../components/AddBar'
 import { EmptyState } from '../../components/EmptyState'
-import { CheckCircleIcon, TrashIcon } from '../../components/icons'
+import { CheckCircleIcon, ClockIcon, TrashIcon } from '../../components/icons'
+import { TaskEditor } from './TaskEditor'
 
-interface Todo extends Doc {
+export interface Todo extends Doc {
   text: string
   done: boolean
   order: number
+  color?: string
+  remindAt?: string | null
+  calendarEventId?: string | null
   createdAt?: unknown
 }
 
-export function TodosPage() {
+function formatReminder(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+export function TasksPage() {
   const { docs, loading, add, update, remove } = useCollection<Todo>('todos', orderBy('order', 'asc'))
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editing, setEditing] = useState<Todo | null>(null)
 
   const active = docs.filter((t) => !t.done)
   const done = docs.filter((t) => t.done)
 
   const addTodo = (text: string) => {
     const minOrder = docs.reduce((m, t) => Math.min(m, t.order ?? 0), 0)
-    add({ text, done: false, order: minOrder - 1 })
+    add({
+      text,
+      done: false,
+      order: minOrder - 1,
+      color: randomTaskColor(),
+      remindAt: null,
+      calendarEventId: null,
+    })
+  }
+
+  // Deleting or completing a task also removes its calendar event (best-effort).
+  const deleteTask = (todo: Todo) => {
+    if (todo.calendarEventId) deleteEvent(todo.calendarEventId).catch(() => {})
+    remove(todo.id)
+  }
+
+  const toggleDone = (todo: Todo) => {
+    if (!todo.done && todo.calendarEventId) {
+      deleteEvent(todo.calendarEventId).catch(() => {})
+      update(todo.id, { done: true, calendarEventId: null })
+    } else {
+      update(todo.id, { done: !todo.done })
+    }
   }
 
   return (
@@ -34,7 +73,7 @@ export function TodosPage() {
         <EmptyState
           icon={<CheckCircleIcon className="h-7 w-7" />}
           title="Nothing to do — yet"
-          subtitle="Add your first task above. It syncs instantly across your devices."
+          subtitle="Add a task above, or hold the mic and say it. Tap a task to set a reminder."
         />
       )}
 
@@ -44,14 +83,9 @@ export function TodosPage() {
             <TodoRow
               key={todo.id}
               todo={todo}
-              editing={editingId === todo.id}
-              onEdit={() => setEditingId(todo.id)}
-              onCommit={(text) => {
-                setEditingId(null)
-                if (text.trim() && text !== todo.text) update(todo.id, { text: text.trim() })
-              }}
-              onToggle={() => update(todo.id, { done: !todo.done })}
-              onDelete={() => remove(todo.id)}
+              onEdit={() => setEditing(todo)}
+              onToggle={() => toggleDone(todo)}
+              onDelete={() => deleteTask(todo)}
             />
           ))}
         </AnimatePresence>
@@ -68,9 +102,7 @@ export function TodosPage() {
                 <TodoRow
                   key={todo.id}
                   todo={todo}
-                  editing={false}
-                  onEdit={() => {}}
-                  onCommit={() => {}}
+                  onEdit={() => setEditing(todo)}
                   onToggle={() => update(todo.id, { done: !todo.done })}
                   onDelete={() => remove(todo.id)}
                 />
@@ -79,27 +111,35 @@ export function TodosPage() {
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {editing && (
+          <TaskEditor
+            task={editing}
+            onClose={() => setEditing(null)}
+            onUpdate={update}
+            onDelete={() => {
+              deleteTask(editing)
+              setEditing(null)
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   )
 }
 
 function TodoRow({
   todo,
-  editing,
   onEdit,
-  onCommit,
   onToggle,
   onDelete,
 }: {
   todo: Todo
-  editing: boolean
   onEdit: () => void
-  onCommit: (text: string) => void
   onToggle: () => void
   onDelete: () => void
 }) {
-  const [text, setText] = useState(todo.text)
-
   return (
     <motion.div
       layout
@@ -109,36 +149,28 @@ function TodoRow({
       transition={{ type: 'spring', stiffness: 400, damping: 34 }}
       className="card group flex items-center gap-3 px-4 py-3"
     >
-      <Checkbox checked={todo.done} onChange={onToggle} />
-      {editing ? (
-        <input
-          autoFocus
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onBlur={() => onCommit(text)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') onCommit(text)
-            if (e.key === 'Escape') onCommit(todo.text)
-          }}
-          className="w-full bg-transparent text-[15px] outline-none"
-        />
-      ) : (
-        <button
-          onClick={onEdit}
-          className={`flex-1 text-left text-[15px] transition-colors ${
+      <Checkbox checked={todo.done} accent={todo.color} onChange={onToggle} />
+      <button onClick={onEdit} className="min-w-0 flex-1 text-left">
+        <span
+          className={`block truncate text-[15px] transition-colors ${
             todo.done ? 'text-subtle line-through' : 'text-ink'
           }`}
         >
           {todo.text}
-        </button>
-      )}
-      <IconButton
-        onClick={onDelete}
-        aria-label="Delete"
-        className="opacity-0 group-hover:opacity-100"
-      >
+        </span>
+        {todo.remindAt && !todo.done && (
+          <span className="mt-0.5 flex items-center gap-1 text-xs text-subtle">
+            <ClockIcon className="h-3.5 w-3.5" />
+            {formatReminder(todo.remindAt)}
+          </span>
+        )}
+      </button>
+      <IconButton onClick={onDelete} aria-label="Delete" className="opacity-0 group-hover:opacity-100">
         <TrashIcon className="h-4 w-4" />
       </IconButton>
     </motion.div>
   )
 }
+
+// Keep the existing route import name working after the Tasks rename.
+export const TodosPage = TasksPage

@@ -62,6 +62,33 @@ export const XIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 )
 
+export const MicIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" />
+  </svg>
+)
+
+export const CalendarIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="5" width="18" height="16" rx="2" />
+    <path d="M3 9h18M8 3v4M16 3v4" />
+  </svg>
+)
+
+export const ClockIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
+  </svg>
+)
+
+export const CheckIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <path d="M5 13l4 4L19 7" />
+  </svg>
+)
+
 export const GoogleIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg viewBox="0 0 24 24" {...p}>
     <path

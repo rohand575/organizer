@@ -1,0 +1,194 @@
+/**
+ * Executes interpreted voice actions against Firestore, matching the exact
+ * document shapes the pages use (order, colors, defaults). Writes go straight
+ * through the SDK using the signed-in user's uid.
+ */
+import { addDoc, collection, getDocs, serverTimestamp } from 'firebase/firestore'
+import { db } from './firebase'
+import type { Action } from './intent'
+import { createEvent, isCalendarConnected } from './calendar'
+
+const LIST_COLORS = ['#0A84FF', '#34C759', '#FF9500', '#FF375F', '#AF52DE', '#5AC8FA']
+
+/** Vivid task colors, assigned at random so each task stands out differently. */
+export const TASK_COLORS = ['#FF375F', '#0A84FF', '#34C759', '#FF9500', '#AF52DE', '#5AC8FA', '#FF9F0A', '#BF5AF2']
+
+export function randomTaskColor(): string {
+  return TASK_COLORS[Math.floor(Math.random() * TASK_COLORS.length)]
+}
+
+/** 45-minute default duration for reminder-backed calendar events. */
+export const REMINDER_DURATION_MIN = 45
+
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+// Map each task hex color to the closest Google Calendar colorId (1..11) so the
+// calendar event visually matches the task's dot. Since task colors are random,
+// the events end up nicely varied (red, blue, green, orange, purple…).
+const CALENDAR_COLOR_BY_HEX: Record<string, string> = {
+  '#FF375F': '11', // Tomato (red)
+  '#0A84FF': '7', // Peacock (blue)
+  '#34C759': '2', // Sage (green)
+  '#FF9500': '6', // Tangerine (orange)
+  '#AF52DE': '3', // Grape (purple)
+  '#5AC8FA': '7', // Peacock (light blue)
+  '#FF9F0A': '5', // Banana (amber)
+  '#BF5AF2': '3', // Grape (purple)
+}
+
+/** Google Calendar colorId for a task's hex color, if known. */
+export function calendarColorId(hex?: string): string | undefined {
+  return hex ? CALENDAR_COLOR_BY_HEX[hex] : undefined
+}
+
+export interface NewTask {
+  text: string
+  remindAt?: string
+}
+
+export interface ListRef {
+  id: string
+  title: string
+}
+
+/** Read the user's list titles (for intent context + local matching). */
+export async function loadLists(uid: string): Promise<ListRef[]> {
+  if (!db) return []
+  const snap = await getDocs(collection(db, 'users', uid, 'lists'))
+  return snap.docs.map((d) => ({ id: d.id, title: String((d.data() as { title?: unknown }).title ?? '') }))
+}
+
+const norm = (s: string) => s.toLowerCase().replace(/\blist\b/g, '').replace(/[^a-z0-9]/g, '').trim()
+
+function matchList(lists: ListRef[], name: string): ListRef | undefined {
+  const target = norm(name)
+  if (!target) return undefined
+  return (
+    lists.find((l) => norm(l.title) === target) ??
+    lists.find((l) => norm(l.title).includes(target) || target.includes(norm(l.title)))
+  )
+}
+
+async function addTodos(uid: string, tasks: NewTask[]) {
+  const col = collection(db!, 'users', uid, 'todos')
+  const snap = await getDocs(col)
+  let minOrder = snap.docs.reduce((m, d) => Math.min(m, Number((d.data() as { order?: number }).order ?? 0)), 0)
+  for (const task of tasks) {
+    minOrder -= 1
+    const color = randomTaskColor()
+    let calendarEventId: string | null = null
+    if (task.remindAt && isCalendarConnected()) {
+      try {
+        calendarEventId = await createEvent({
+          summary: task.text,
+          startISO: task.remindAt,
+          durationMin: REMINDER_DURATION_MIN,
+          timeZone: TZ,
+          colorId: calendarColorId(color),
+        })
+      } catch {
+        // Non-fatal: the task is still saved without a calendar event.
+      }
+    }
+    await addDoc(col, {
+      text: task.text,
+      done: false,
+      order: minOrder,
+      color,
+      remindAt: task.remindAt ?? null,
+      calendarEventId,
+      createdAt: serverTimestamp(),
+    })
+  }
+}
+
+async function createList(uid: string, title: string): Promise<ListRef> {
+  const col = collection(db!, 'users', uid, 'lists')
+  const snap = await getDocs(col)
+  const minOrder = snap.docs.reduce((m, d) => Math.min(m, Number((d.data() as { order?: number }).order ?? 0)), 0)
+  const color = LIST_COLORS[snap.size % LIST_COLORS.length]
+  const ref = await addDoc(col, {
+    title,
+    color,
+    expanded: true,
+    order: minOrder - 1,
+    createdAt: serverTimestamp(),
+  })
+  return { id: ref.id, title }
+}
+
+async function addListItems(uid: string, listId: string, items: string[]) {
+  const col = collection(db!, 'users', uid, 'lists', listId, 'items')
+  const snap = await getDocs(col)
+  let maxOrder = snap.docs.reduce((m, d) => Math.max(m, Number((d.data() as { order?: number }).order ?? 0)), 0)
+  for (const text of items) {
+    maxOrder += 1
+    await addDoc(col, { text, checked: false, order: maxOrder, createdAt: serverTimestamp() })
+  }
+}
+
+async function addNote(uid: string, title: string, body: string) {
+  const col = collection(db!, 'users', uid, 'notes')
+  await addDoc(col, {
+    title,
+    body,
+    color: '#FFFFFF',
+    pinned: false,
+    updatedAt: serverTimestamp(),
+    createdAt: serverTimestamp(),
+  })
+}
+
+export interface ExecResult {
+  summary: string
+  ok: boolean
+}
+
+/** Run all actions and return a short human summary for the toast. */
+export async function executeActions(
+  uid: string,
+  actions: Action[],
+  knownLists: ListRef[],
+): Promise<ExecResult> {
+  if (!db) return { summary: 'Not connected.', ok: false }
+
+  const lists = [...knownLists]
+  const parts: string[] = []
+  const newTasks: NewTask[] = []
+
+  for (const action of actions) {
+    if (action.type === 'add_todo') {
+      newTasks.push({ text: action.text, remindAt: action.remindAt })
+    } else if (action.type === 'add_list_items') {
+      let list = matchList(lists, action.list)
+      if (!list) {
+        list = await createList(uid, action.list)
+        lists.push(list)
+      }
+      await addListItems(uid, list.id, action.items)
+      parts.push(
+        `${action.items.length} item${action.items.length > 1 ? 's' : ''} to ${list.title}`,
+      )
+    } else if (action.type === 'add_note') {
+      await addNote(uid, action.title, action.body)
+      parts.push(`note${action.title ? ` “${action.title}”` : ''}`)
+    }
+  }
+
+  if (newTasks.length) {
+    await addTodos(uid, newTasks)
+    const withReminder = newTasks.filter((t) => t.remindAt).length
+    let label = `${newTasks.length} task${newTasks.length > 1 ? 's' : ''}`
+    if (withReminder) label += isCalendarConnected() ? ' + calendar' : ' (reminder)'
+    parts.unshift(label)
+  }
+
+  if (parts.length === 0) {
+    const unknown = actions.find((a) => a.type === 'unknown') as
+      | { type: 'unknown'; reason?: string }
+      | undefined
+    return { summary: unknown?.reason || "Didn't catch an action.", ok: false }
+  }
+
+  return { summary: `Added ${parts.join(' · ')}`, ok: true }
+}

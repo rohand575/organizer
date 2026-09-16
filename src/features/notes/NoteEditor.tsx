@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { IconButton } from '../../components/IconButton'
-import { PinIcon, TrashIcon, XIcon } from '../../components/icons'
+import { MicIcon, PinIcon, TrashIcon, XIcon } from '../../components/icons'
+import { hasVoiceKeys, transcribe } from '../../lib/stt'
+import { polishDictation } from '../../lib/intent'
+import { useHoldToTalk } from '../../lib/useHoldToTalk'
 import { NOTE_COLORS, type NoteDoc } from './NotesPage'
 
 interface SaveData {
@@ -25,8 +28,51 @@ export function NoteEditor({
   const [body, setBody] = useState(note?.body ?? '')
   const [color, setColor] = useState(note?.color ?? '#FFFFFF')
   const [pinned, setPinned] = useState(note?.pinned ?? false)
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const [dictation, setDictation] = useState<'idle' | 'working' | 'error'>('idle')
 
   const commit = () => onSave({ id: note?.id, title, body, color, pinned })
+
+  // Insert dictated text at the caret (or append), fixing up spacing.
+  const insertText = (text: string) => {
+    setBody((prev) => {
+      const ta = bodyRef.current
+      const start = ta?.selectionStart ?? prev.length
+      const end = ta?.selectionEnd ?? prev.length
+      const before = prev.slice(0, start)
+      const after = prev.slice(end)
+      const lead = before && !/\s$/.test(before) ? ' ' : ''
+      const insert = lead + text
+      requestAnimationFrame(() => {
+        const pos = (before + insert).length
+        ta?.focus()
+        ta?.setSelectionRange(pos, pos)
+      })
+      return before + insert + after
+    })
+  }
+
+  const { recording, bind } = useHoldToTalk({
+    disabled: dictation === 'working',
+    onResult: async (blob) => {
+      setDictation('working')
+      try {
+        const raw = await transcribe(blob)
+        if (raw) {
+          const clean = await polishDictation(raw)
+          insertText(clean)
+        }
+        setDictation('idle')
+      } catch {
+        setDictation('error')
+        setTimeout(() => setDictation('idle'), 2500)
+      }
+    },
+    onMicBlocked: () => {
+      setDictation('error')
+      setTimeout(() => setDictation('idle'), 2500)
+    },
+  })
 
   return (
     <motion.div
@@ -63,6 +109,7 @@ export function NoteEditor({
             className="w-full bg-transparent pb-2 text-xl font-semibold outline-none placeholder:text-ink/30"
           />
           <textarea
+            ref={bodyRef}
             value={body}
             onChange={(e) => setBody(e.target.value)}
             placeholder="Take a note…"
@@ -86,6 +133,24 @@ export function NoteEditor({
               />
             ))}
           </div>
+          {hasVoiceKeys && (
+            <button
+              aria-label="Hold to dictate"
+              disabled={dictation === 'working'}
+              style={{ touchAction: 'none' }}
+              {...bind}
+              className={`press relative grid h-9 w-9 shrink-0 place-items-center rounded-full transition-colors ${
+                recording ? 'bg-[#FF375F] text-white' : 'text-subtle hover:text-accent'
+              }`}
+            >
+              {dictation === 'working' ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-hair border-t-accent" />
+              ) : (
+                <MicIcon className="h-5 w-5" />
+              )}
+              {recording && <span className="absolute inset-0 animate-ping rounded-full bg-[#FF375F]/25" />}
+            </button>
+          )}
           {onDelete && (
             <IconButton onClick={onDelete} aria-label="Delete note">
               <TrashIcon className="h-5 w-5" />

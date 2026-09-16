@@ -40,10 +40,11 @@ export default function App() {
     <AppShell>
       <AnimatePresence mode="wait">
         <Routes location={location} key={location.pathname}>
-          <Route path="/todos" element={<Page><TodosPage /></Page>} />
+          <Route path="/tasks" element={<Page><TodosPage /></Page>} />
           <Route path="/lists" element={<Page><ListsPage /></Page>} />
           <Route path="/notes" element={<Page><NotesPage /></Page>} />
-          <Route path="*" element={<Navigate to="/todos" replace />} />
+          <Route path="/todos" element={<Navigate to="/tasks" replace />} />
+          <Route path="*" element={<Navigate to="/tasks" replace />} />
         </Routes>
       </AnimatePresence>
     </AppShell>

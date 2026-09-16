@@ -10,3 +10,6 @@ dist-ssr
 !.vscode/extensions.json
 android/
 *.keystore
+
+# TypeScript incremental build info
+*.tsbuildinfo

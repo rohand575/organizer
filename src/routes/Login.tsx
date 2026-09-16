@@ -31,7 +31,7 @@ export function Login() {
         </div>
         <h1 className="text-4xl font-bold tracking-tight">Organizer</h1>
         <p className="mt-3 text-[15px] text-subtle">
-          To-dos, lists and notes — beautifully in sync across all your devices.
+          Tasks, lists and notes — beautifully in sync across all your devices.
         </p>
 
         {configured ? (
