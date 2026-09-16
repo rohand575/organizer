@@ -114,12 +114,12 @@ export function VoiceFab({ voice }: { voice: VoiceCommand }) {
       disabled={voice.working}
       style={{ touchAction: 'none' }}
       {...voice.bind}
-      className={`press safe-bottom fixed bottom-24 right-5 z-40 grid h-[52px] w-[52px] place-items-center rounded-full border border-white/10 text-white shadow-float backdrop-blur-xl transition-colors md:bottom-8 ${
+      className={`press fixed bottom-24 right-5 z-40 grid h-[52px] w-[52px] place-items-center rounded-full border border-white/10 text-white shadow-float backdrop-blur-xl transition-colors md:bottom-8 ${
         voice.recording ? 'bg-[#FF375F]/90' : 'bg-ink/80 hover:bg-ink/90'
       }`}
     >
       {voice.recording && (
-        <span className="absolute inset-0 animate-ping rounded-full bg-[#FF375F]/30" />
+        <span className="pointer-events-none absolute inset-0 animate-ping rounded-full bg-[#FF375F]/30" />
       )}
       {voice.working ? (
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
@@ -130,9 +130,12 @@ export function VoiceFab({ voice }: { voice: VoiceCommand }) {
   )
 }
 
-/** Single shared status pill, rendered once at the app root. */
+/**
+ * Result pill — only shown after a command finishes (success or error). The
+ * recording/processing states are conveyed by the mic button's own animation.
+ */
 export function VoiceToast({ voice }: { voice: VoiceCommand }) {
-  const show = voice.recording || voice.phase === 'working' || voice.phase === 'done' || voice.phase === 'error'
+  const show = voice.phase === 'done' || voice.phase === 'error'
   return (
     <AnimatePresence>
       {show && (
@@ -140,22 +143,14 @@ export function VoiceToast({ voice }: { voice: VoiceCommand }) {
           initial={{ opacity: 0, y: 8, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 8, scale: 0.96 }}
-          className="safe-bottom fixed bottom-24 left-1/2 z-40 w-max max-w-[calc(100vw-2.5rem)] -translate-x-1/2 md:bottom-8"
+          className="fixed bottom-24 left-1/2 z-40 w-max max-w-[calc(100vw-2.5rem)] -translate-x-1/2 md:bottom-8"
         >
           <div
-            className={`card flex items-center gap-2 px-4 py-2.5 text-sm font-medium ${
+            className={`card px-4 py-2.5 text-sm font-medium ${
               voice.phase === 'error' ? 'text-[#FF375F]' : 'text-ink'
             }`}
           >
-            {voice.recording && (
-              <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[#FF375F]" />
-            )}
-            {voice.working && (
-              <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-hair border-t-accent" />
-            )}
-            <span className="truncate">
-              {voice.recording ? 'Listening… release to send' : voice.message}
-            </span>
+            <span className="truncate">{voice.message}</span>
           </div>
         </motion.div>
       )}
