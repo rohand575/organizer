@@ -3,7 +3,7 @@
  * (Groq Llama primary, OpenAI GPT fallback) and returns either structured
  * actions (command mode) or cleaned-up prose (note dictation).
  */
-import { VoiceError } from './stt'
+import { fetchWithTimeout, VoiceError } from './stt'
 
 const GROQ_KEY = import.meta.env.VITE_GROQ_API_KEY
 const OPENAI_KEY = import.meta.env.VITE_OPENAI_API_KEY
@@ -48,20 +48,27 @@ async function chatWith(
 
   let res: Response
   try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: opts.json ? 0.1 : 0.2,
-        max_tokens: opts.maxTokens,
-        ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
-        messages,
-      }),
-      signal: AbortSignal.timeout(30_000),
-    })
+    res = await fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          temperature: opts.json ? 0.1 : 0.2,
+          max_tokens: opts.maxTokens,
+          ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
+          messages,
+        }),
+      },
+      30_000,
+    )
   } catch (e) {
-    throw new VoiceError(`Network error reaching ${provider}: ${(e as Error).message}`, 'network')
+    const aborted = (e as Error).name === 'AbortError'
+    throw new VoiceError(
+      aborted ? `${provider} timed out` : `Network error reaching ${provider}: ${(e as Error).message}`,
+      'network',
+    )
   }
 
   if (!res.ok) {

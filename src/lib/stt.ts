@@ -23,6 +23,20 @@ export class VoiceError extends Error {
 
 const KEYS: Record<Provider, string | undefined> = { groq: GROQ_KEY, openai: OPENAI_KEY }
 
+/**
+ * fetch with a guaranteed timeout via AbortController. We don't use
+ * AbortSignal.timeout() because it isn't reliable across older iOS Safari.
+ */
+export async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** Groq first (fast, free tier), then OpenAI — only providers with a key. */
 function providerOrder(): Provider[] {
   return (['groq', 'openai'] as Provider[]).filter((p) => KEYS[p])
@@ -53,14 +67,17 @@ async function transcribeWith(provider: Provider, blob: Blob): Promise<string> {
 
   let res: Response
   try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}` },
-      body: form,
-      signal: AbortSignal.timeout(45_000),
-    })
+    res = await fetchWithTimeout(
+      url,
+      { method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form },
+      45_000,
+    )
   } catch (e) {
-    throw new VoiceError(`Network error reaching ${provider}: ${(e as Error).message}`, 'network')
+    const aborted = (e as Error).name === 'AbortError'
+    throw new VoiceError(
+      aborted ? `${provider} timed out` : `Network error reaching ${provider}: ${(e as Error).message}`,
+      'network',
+    )
   }
 
   if (!res.ok) {

@@ -51,11 +51,23 @@ export interface ListRef {
   title: string
 }
 
-/** Read the user's list titles (for intent context + local matching). */
+/**
+ * Read the user's list titles (for intent context + local matching). Bounded by
+ * an 8s timeout — on some mobile browsers a Firestore read can stall, and this
+ * must never block the voice pipeline. Falls back to an empty list.
+ */
 export async function loadLists(uid: string): Promise<ListRef[]> {
   if (!db) return []
-  const snap = await getDocs(collection(db, 'users', uid, 'lists'))
-  return snap.docs.map((d) => ({ id: d.id, title: String((d.data() as { title?: unknown }).title ?? '') }))
+  try {
+    const snap = await Promise.race([
+      getDocs(collection(db, 'users', uid, 'lists')),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+    ])
+    if (!snap) return []
+    return snap.docs.map((d) => ({ id: d.id, title: String((d.data() as { title?: unknown }).title ?? '') }))
+  } catch {
+    return []
+  }
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/\blist\b/g, '').replace(/[^a-z0-9]/g, '').trim()
