@@ -83,10 +83,11 @@ function matchList(lists: ListRef[], name: string): ListRef | undefined {
 
 async function addTodos(uid: string, tasks: NewTask[]) {
   const col = collection(db!, 'users', uid, 'todos')
-  const snap = await getDocs(col)
-  let minOrder = snap.docs.reduce((m, d) => Math.min(m, Number((d.data() as { order?: number }).order ?? 0)), 0)
+  // Time-based order (negative → newest on top) avoids a blocking read of the
+  // whole collection, which can hang on flaky connections.
+  const base = Date.now()
+  let i = 0
   for (const task of tasks) {
-    minOrder -= 1
     const color = randomTaskColor()
     let calendarEventId: string | null = null
     if (task.remindAt && isCalendarConnected()) {
@@ -105,25 +106,26 @@ async function addTodos(uid: string, tasks: NewTask[]) {
     await addDoc(col, {
       text: task.text,
       done: false,
-      order: minOrder,
+      order: i - base, // earlier tasks sort above later ones, all above existing
       color,
       remindAt: task.remindAt ?? null,
       calendarEventId,
       createdAt: serverTimestamp(),
     })
+    i += 1
   }
 }
 
+let listColorSeed = Date.now()
+
 async function createList(uid: string, title: string): Promise<ListRef> {
   const col = collection(db!, 'users', uid, 'lists')
-  const snap = await getDocs(col)
-  const minOrder = snap.docs.reduce((m, d) => Math.min(m, Number((d.data() as { order?: number }).order ?? 0)), 0)
-  const color = LIST_COLORS[snap.size % LIST_COLORS.length]
+  const color = LIST_COLORS[listColorSeed++ % LIST_COLORS.length]
   const ref = await addDoc(col, {
     title,
     color,
+    order: -Date.now(), // newest on top, no collection read needed
     expanded: true,
-    order: minOrder - 1,
     createdAt: serverTimestamp(),
   })
   return { id: ref.id, title }
@@ -131,11 +133,12 @@ async function createList(uid: string, title: string): Promise<ListRef> {
 
 async function addListItems(uid: string, listId: string, items: string[]) {
   const col = collection(db!, 'users', uid, 'lists', listId, 'items')
-  const snap = await getDocs(col)
-  let maxOrder = snap.docs.reduce((m, d) => Math.max(m, Number((d.data() as { order?: number }).order ?? 0)), 0)
+  // Positive, increasing order → items append at the bottom, no read required.
+  const base = Date.now()
+  let i = 0
   for (const text of items) {
-    maxOrder += 1
-    await addDoc(col, { text, checked: false, order: maxOrder, createdAt: serverTimestamp() })
+    await addDoc(col, { text, checked: false, order: base + i, createdAt: serverTimestamp() })
+    i += 1
   }
 }
 

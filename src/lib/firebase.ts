@@ -28,8 +28,12 @@ let googleProvider: GoogleAuthProvider | undefined
 if (isFirebaseConfigured) {
   app = initializeApp(firebaseConfig)
   // Offline-first: persistent IndexedDB cache with multi-tab support.
+  // experimentalAutoDetectLongPolling: Firestore's default streaming transport
+  // fails inside iOS standalone PWAs (and some proxies), which makes server
+  // reads/writes hang. Auto-detect falls back to long-polling so it works there.
   db = initializeFirestore(app, {
     localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    experimentalAutoDetectLongPolling: true,
   })
   auth = getAuth(app)
   googleProvider = new GoogleAuthProvider()

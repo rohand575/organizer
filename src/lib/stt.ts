@@ -31,7 +31,15 @@ export async function fetchWithTimeout(url: string, init: RequestInit, ms: numbe
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), ms)
   try {
-    return await fetch(url, { ...init, signal: controller.signal })
+    // Race the fetch against an independent rejecting timer. On some WebKit
+    // (standalone PWA) contexts, abort() doesn't always settle the fetch, so we
+    // don't rely on it alone.
+    return await Promise.race([
+      fetch(url, { ...init, signal: controller.signal }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new DOMException('Request timed out', 'AbortError')), ms + 500),
+      ),
+    ])
   } finally {
     clearTimeout(timer)
   }
