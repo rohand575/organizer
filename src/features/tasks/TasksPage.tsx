@@ -31,12 +31,27 @@ function formatReminder(iso: string): string {
   })
 }
 
+// A task belongs to "Upcoming" only if it has a reminder set for after today.
+// Everything else — no reminder, or a reminder due today / overdue — is "Today".
+function isUpcoming(task: Task): boolean {
+  if (!task.remindAt) return false
+  const due = new Date(task.remindAt)
+  if (Number.isNaN(due.getTime())) return false
+  const now = new Date()
+  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+  return due.getTime() > endOfToday.getTime()
+}
+
 export function TasksPage() {
   const { docs, loading, add, update, remove } = useCollection<Task>('tasks', orderBy('order', 'asc'))
   const [editing, setEditing] = useState<Task | null>(null)
 
   const active = docs.filter((t) => !t.done)
   const done = docs.filter((t) => t.done)
+  const today = active.filter((t) => !isUpcoming(t))
+  const upcoming = active
+    .filter(isUpcoming)
+    .sort((a, b) => (a.remindAt ?? '').localeCompare(b.remindAt ?? ''))
 
   const addTask = (text: string) => {
     const minOrder = docs.reduce((m, t) => Math.min(m, t.order ?? 0), 0)
@@ -77,25 +92,47 @@ export function TasksPage() {
         />
       )}
 
-      <div className="space-y-2">
-        <AnimatePresence initial={false}>
-          {active.map((task) => (
-            <TaskRow
-              key={task.id}
-              task={task}
-              onEdit={() => setEditing(task)}
-              onToggle={() => toggleDone(task)}
-              onDelete={() => deleteTask(task)}
-            />
-          ))}
-        </AnimatePresence>
-      </div>
+      {today.length > 0 && (
+        <div>
+          <SectionLabel>Today · {today.length}</SectionLabel>
+          <div className="space-y-2">
+            <AnimatePresence initial={false}>
+              {today.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  onEdit={() => setEditing(task)}
+                  onToggle={() => toggleDone(task)}
+                  onDelete={() => deleteTask(task)}
+                />
+              ))}
+            </AnimatePresence>
+          </div>
+        </div>
+      )}
+
+      {upcoming.length > 0 && (
+        <div className="pt-2">
+          <SectionLabel>Upcoming · {upcoming.length}</SectionLabel>
+          <div className="space-y-2">
+            <AnimatePresence initial={false}>
+              {upcoming.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  onEdit={() => setEditing(task)}
+                  onToggle={() => toggleDone(task)}
+                  onDelete={() => deleteTask(task)}
+                />
+              ))}
+            </AnimatePresence>
+          </div>
+        </div>
+      )}
 
       {done.length > 0 && (
         <div className="pt-4">
-          <div className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-subtle">
-            Completed · {done.length}
-          </div>
+          <SectionLabel>Completed · {done.length}</SectionLabel>
           <div className="space-y-2">
             <AnimatePresence initial={false}>
               {done.map((task) => (
@@ -125,6 +162,14 @@ export function TasksPage() {
           />
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-subtle">
+      {children}
     </div>
   )
 }

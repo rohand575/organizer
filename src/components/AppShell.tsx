@@ -5,6 +5,7 @@ import { AnimatePresence } from 'framer-motion'
 import { useAuth } from '../auth/AuthProvider'
 import { CheckCircleIcon, ListIcon, NoteIcon } from './icons'
 import { VoiceFab, VoiceToast, useVoiceCommand } from './VoiceControls'
+import { NetworkStatus } from './NetworkStatus'
 import { Settings } from './Settings'
 
 const tabs = [
@@ -96,6 +97,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </NavLink>
         ))}
       </nav>
+
+      {/* Offline / reconnect banner */}
+      <NetworkStatus />
 
       {/* Floating command mic (Tasks & Lists only) + shared status pill */}
       <VoiceFab voice={voice} />

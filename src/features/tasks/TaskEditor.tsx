@@ -4,6 +4,7 @@ import { IconButton } from '../../components/IconButton'
 import { CalendarIcon, ClockIcon, TrashIcon, XIcon } from '../../components/icons'
 import { createEvent, deleteEvent, isCalendarConnected, updateEvent } from '../../lib/calendar'
 import { calendarColorId, REMINDER_DURATION_MIN, TASK_COLORS } from '../../lib/commands'
+import { useVisualViewport } from '../../lib/useVisualViewport'
 import type { Task } from './TasksPage'
 
 // Firestore stores remindAt as a local ISO string (YYYY-MM-DDTHH:MM:SS).
@@ -29,6 +30,7 @@ export function TaskEditor({
   const [remindOn, setRemindOn] = useState(Boolean(task.remindAt))
   const [when, setWhen] = useState(toInput(task.remindAt))
   const [saving, setSaving] = useState(false)
+  const vv = useVisualViewport()
 
   const save = async () => {
     if (saving) return
@@ -72,7 +74,8 @@ export function TaskEditor({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       onClick={save}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 backdrop-blur-sm sm:items-center"
+      style={{ top: vv.offsetTop, height: vv.height }}
+      className="fixed left-0 right-0 z-50 flex items-end justify-center bg-black/30 backdrop-blur-sm sm:items-center"
     >
       <motion.div
         initial={{ y: 40, scale: 0.98, opacity: 0 }}
@@ -80,7 +83,8 @@ export function TaskEditor({
         exit={{ y: 40, opacity: 0 }}
         transition={{ type: 'spring', stiffness: 320, damping: 32 }}
         onClick={(e) => e.stopPropagation()}
-        className="safe-bottom flex w-full max-w-md flex-col rounded-t-3xl bg-surface shadow-float sm:rounded-3xl"
+        style={{ maxHeight: vv.height }}
+        className="safe-bottom flex w-full max-w-md flex-col overflow-y-auto rounded-t-3xl bg-surface shadow-float sm:rounded-3xl"
       >
         <div className="flex items-center justify-between px-5 pt-4">
           <span className="text-xs font-semibold uppercase tracking-wide text-subtle">Edit task</span>
