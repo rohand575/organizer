@@ -9,6 +9,7 @@ import { TasksPage } from './features/tasks/TasksPage'
 import { ListsPage } from './features/lists/ListsPage'
 import { NotesPage } from './features/notes/NotesPage'
 import { migrateTodosToTasks } from './lib/migrate'
+import { reconcilePendingReminders } from './lib/commands'
 
 function Spinner() {
   return (
@@ -38,6 +39,18 @@ export default function App() {
   // One-time copy of legacy `todos` docs into the renamed `tasks` collection.
   useEffect(() => {
     if (user) void migrateTodosToTasks(user.uid)
+  }, [user])
+
+  // Reminders created while Calendar was disconnected or the device was offline
+  // never got a calendar event. Reconcile them on launch and whenever the
+  // network comes back, so they sync automatically without any user action.
+  useEffect(() => {
+    if (!user) return
+    const uid = user.uid
+    const run = () => void reconcilePendingReminders(uid)
+    run()
+    window.addEventListener('online', run)
+    return () => window.removeEventListener('online', run)
   }, [user])
 
   if (loading) return <Spinner />

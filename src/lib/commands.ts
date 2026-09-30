@@ -233,6 +233,58 @@ async function updateTaskDoc(
   })()
 }
 
+/**
+ * Push reminders that never reached Google Calendar. A task ends up with a
+ * `remindAt` but no `calendarEventId` whenever it was created/edited while
+ * Calendar was disconnected or the device was offline. This finds those tasks
+ * and creates their events. Safe to call repeatedly and from anywhere: it no-ops
+ * when Calendar isn't connected or the device is offline, only touches tasks
+ * that are still missing an event id, and leaves anything it can't sync for the
+ * next pass. Returns how many events it created.
+ */
+export async function reconcilePendingReminders(uid: string): Promise<number> {
+  if (!db || !isCalendarConnected()) return 0
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return 0
+
+  let snap
+  try {
+    snap = await getDocs(collection(db, 'users', uid, 'tasks'))
+  } catch {
+    return 0
+  }
+
+  let synced = 0
+  for (const d of snap.docs) {
+    const data = d.data() as {
+      text?: unknown
+      color?: unknown
+      done?: unknown
+      remindAt?: unknown
+      calendarEventId?: unknown
+    }
+    const remindAt = typeof data.remindAt === 'string' ? data.remindAt : null
+    const alreadySynced = typeof data.calendarEventId === 'string' && data.calendarEventId
+    if (!remindAt || Boolean(data.done) || alreadySynced) continue
+
+    try {
+      const id = await createEvent({
+        summary: String(data.text ?? ''),
+        startISO: remindAt,
+        durationMin: REMINDER_DURATION_MIN,
+        timeZone: TZ,
+        colorId: calendarColorId(typeof data.color === 'string' ? data.color : undefined),
+      })
+      if (id) {
+        await updateDoc(doc(db, 'users', uid, 'tasks', d.id), { calendarEventId: id })
+        synced++
+      }
+    } catch {
+      // Leave it pending — a later reconcile pass will retry.
+    }
+  }
+  return synced
+}
+
 async function setListItemsChecked(uid: string, listId: string, ids: string[], checked: boolean) {
   await committed(
     Promise.all(
