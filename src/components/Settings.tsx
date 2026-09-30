@@ -7,6 +7,7 @@ import {
   disconnectCalendar,
   isCalendarConnected,
 } from '../lib/calendar'
+import { reconcilePendingReminders } from '../lib/commands'
 import { CalendarIcon, CheckIcon, XIcon } from './icons'
 import { IconButton } from './IconButton'
 
@@ -27,6 +28,8 @@ export function Settings({ onClose }: { onClose: () => void }) {
     try {
       await connectCalendar()
       setConnected(true)
+      // Back-fill any reminders that were saved while disconnected.
+      if (user) void reconcilePendingReminders(user.uid)
     } catch (e) {
       setError((e as Error).message || 'Could not connect. Try again.')
     } finally {

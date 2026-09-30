@@ -32,6 +32,46 @@ interface Cached {
   loading: boolean
 }
 
+// --- Offline snapshot mirror -------------------------------------------------
+// iOS uses a memory-only Firestore cache (see firebase.ts) that's empty on every
+// cold start, so opening the app offline showed blank lists. We mirror each
+// collection's latest snapshot into localStorage — synchronous and reliable on
+// iOS, unlike IndexedDB — and seed the UI from it on launch. The data is tiny
+// (tasks, lists, notes, and each list's items), and the live listener overwrites
+// it as soon as Firestore reconnects.
+const CACHE_PREFIX = 'organizer_cache:'
+
+function cacheKey(uid: string, path: string): string {
+  return `${CACHE_PREFIX}${uid}:${path}`
+}
+
+function readCache(uid: string, path: string): Doc[] | null {
+  try {
+    const raw = localStorage.getItem(cacheKey(uid, path))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? (parsed as Doc[]) : null
+  } catch {
+    return null
+  }
+}
+
+function writeCache(uid: string, path: string, docs: Doc[]): void {
+  try {
+    localStorage.setItem(cacheKey(uid, path), JSON.stringify(docs))
+  } catch {
+    // Storage full or unavailable (e.g. private mode) — offline seeding just
+    // won't be there; never let it break the actual write.
+  }
+}
+
+// An empty snapshot that came only from the local cache (not the server) is the
+// signature of iOS's memory cache on a cold start. Ignore it so it can't wipe
+// the docs we just seeded from localStorage before the network responds.
+function isStaleEmpty(snap: { metadata: { fromCache: boolean }; empty: boolean }): boolean {
+  return snap.metadata.fromCache && snap.empty
+}
+
 // The top-level collections that back the three tabs. We keep a single live
 // listener open for each for the WHOLE session (see CollectionsProvider) instead
 // of subscribing per-page. On iOS we use Firestore's memory-only cache, and a
@@ -60,14 +100,29 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user || !db) return
+    const uid = user.uid
+
+    // Seed instantly from the last-synced snapshot so data shows even on an
+    // offline cold start, before any listener has had a chance to fire.
+    setState((s) => {
+      const next = { ...s }
+      for (const path of Object.keys(MANAGED)) {
+        const cached = readCache(uid, path)
+        if (cached) next[path] = { docs: cached, loading: false }
+      }
+      return next
+    })
+
     const unsubs = Object.entries(MANAGED).map(([path, constraints]) => {
-      const colRef = collection(db!, 'users', user.uid, path)
+      const colRef = collection(db!, 'users', uid, path)
       const q = query(colRef, ...constraints)
       return onSnapshot(
         q,
         (snap) => {
+          if (isStaleEmpty(snap)) return
           const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Doc[]
           setState((s) => ({ ...s, [path]: { docs, loading: false } }))
+          writeCache(uid, path, docs)
         },
         () => {
           // Listen failed — drop the spinner so the UI isn't stuck; Firestore
@@ -104,13 +159,26 @@ export function useCollection<T extends Doc>(path: string, ...constraints: Query
 
   useEffect(() => {
     // Managed collections are handled by the provider; don't open a second listener.
-    if (managed || !colRef) return
+    if (managed || !colRef || !user) return
+    const uid = user.uid
+
+    // Seed from the offline mirror first (e.g. a shopping list's items viewed
+    // at the store with no signal), then let the live listener refresh it.
+    const cached = readCache(uid, path)
+    if (cached) {
+      setLocalDocs(cached as T[])
+      setLocalLoading(false)
+    }
+
     const q = query(colRef, ...constraints)
     const unsub = onSnapshot(
       q,
       (snap) => {
-        setLocalDocs(snap.docs.map((d) => ({ id: d.id, ...d.data() })) as T[])
+        if (isStaleEmpty(snap)) return
+        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as T[]
+        setLocalDocs(docs)
         setLocalLoading(false)
+        writeCache(uid, path, docs)
       },
       () => setLocalLoading(false),
     )
