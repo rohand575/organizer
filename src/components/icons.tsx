@@ -89,6 +89,53 @@ export const CheckIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 )
 
+export const FolderIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+  </svg>
+)
+
+export const SearchIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="M16 16l4.5 4.5" />
+  </svg>
+)
+
+export const ArchiveIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="4" width="18" height="4" rx="1" />
+    <path d="M5 8v11h14V8M10 12h4" />
+  </svg>
+)
+
+export const UnarchiveIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="4" width="18" height="4" rx="1" />
+    <path d="M5 8v11h14V8M12 17v-5M9.5 14.5L12 12l2.5 2.5" />
+  </svg>
+)
+
+export const ShareIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <path d="M12 3v12M8 7l4-4 4 4M6 11H5v9h14v-9h-1" />
+  </svg>
+)
+
+export const PencilIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" />
+  </svg>
+)
+
+export const ChecklistIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="4" width="6" height="6" rx="1.5" />
+    <path d="M4.5 7l1 1 2-2M13 7h8M13 17h8" />
+    <rect x="3" y="14" width="6" height="6" rx="1.5" />
+  </svg>
+)
+
 export const GoogleIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg viewBox="0 0 24 24" {...p}>
     <path

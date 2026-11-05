@@ -10,6 +10,7 @@ import { ListsPage } from './features/lists/ListsPage'
 import { NotesPage } from './features/notes/NotesPage'
 import { migrateTodosToTasks } from './lib/migrate'
 import { reconcilePendingReminders } from './lib/commands'
+import { replayNoteOutbox } from './features/notes/notes'
 
 function Spinner() {
   return (
@@ -53,6 +54,18 @@ export default function App() {
     return () => window.removeEventListener('online', run)
   }, [user])
 
+  // Note writes that never reached the server (e.g. made offline on iOS, whose
+  // memory-only cache dies with the app) are kept in a local outbox; re-send
+  // them on launch and on reconnect. Launch also rescues a crashed editor draft.
+  useEffect(() => {
+    if (!user) return
+    const uid = user.uid
+    void replayNoteOutbox(uid, { promoteDraft: true })
+    const onOnline = () => void replayNoteOutbox(uid)
+    window.addEventListener('online', onOnline)
+    return () => window.removeEventListener('online', onOnline)
+  }, [user])
+
   if (loading) return <Spinner />
   if (!user || !configured) return <Login />
 
@@ -63,6 +76,8 @@ export default function App() {
           <Route path="/tasks" element={<Page><TasksPage /></Page>} />
           <Route path="/lists" element={<Page><ListsPage /></Page>} />
           <Route path="/notes" element={<Page><NotesPage /></Page>} />
+          <Route path="/notes/archive" element={<Page><NotesPage archive /></Page>} />
+          <Route path="/notes/f/:folderId" element={<Page><NotesPage /></Page>} />
           <Route path="*" element={<Navigate to="/tasks" replace />} />
         </Routes>
       </AnimatePresence>

@@ -23,7 +23,8 @@ const titles: Record<string, string> = {
 export function AppShell({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const { pathname } = useLocation()
-  const title = titles[pathname] ?? 'Organizer'
+  // Sub-routes (e.g. /notes/f/:id) keep their tab's title.
+  const title = titles[`/${pathname.split('/')[1]}`] ?? 'Organizer'
   const voice = useVoiceCommand()
   const [settingsOpen, setSettingsOpen] = useState(false)
 

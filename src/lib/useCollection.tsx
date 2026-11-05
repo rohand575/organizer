@@ -84,6 +84,9 @@ const MANAGED: Record<string, QueryConstraint[]> = {
   tasks: [orderBy('order', 'asc')],
   lists: [orderBy('order', 'asc')],
   notes: [orderBy('updatedAt', 'desc')],
+  // Few docs; sorted by name on the client (localeCompare beats Firestore's
+  // case-sensitive string order).
+  noteFolders: [],
 }
 
 const CollectionsContext = createContext<Record<string, Cached>>({})

@@ -4,7 +4,7 @@ A premium, Apple-style **To-do · Lists · Notes** app. Works as a responsive we
 
 - **To-do** — a checklist with add/edit/complete/delete, completed section
 - **Lists** — multiple named lists as collapsible dropdown cards, each with color-coded checkable items (e.g. Groceries)
-- **Notes** — Google Keep-style masonry of colored, pinnable notes with an editor sheet
+- **Notes** — Google Keep-style masonry of colored, pinnable notes with an editor sheet; folders, search, archive with undo, checklists/bullets/links rendered from plain text, and share/copy
 - **Google Sign-In**, private per-user data, real-time + offline sync
 
 ---
@@ -62,8 +62,11 @@ firebase deploy --only firestore:rules --project <your-project-id>
 users/{uid}/tasks/{id}                  { text, done, order, color, remindAt, calendarEventId, createdAt }
 users/{uid}/lists/{id}                  { title, color, expanded, order, createdAt }
 users/{uid}/lists/{id}/items/{itemId}   { text, checked, order }
-users/{uid}/notes/{id}                  { title, body, color, pinned, updatedAt }
+users/{uid}/notes/{id}                  { title, body, color, pinned, folderId, archived, updatedAt, createdAt }
+users/{uid}/noteFolders/{id}            { name, createdAt }
 ```
+
+Note bodies stay plain text. The app renders `- [ ]` / `- [x]` lines as checkboxes, `- ` / `1. ` as lists, `#` as headings, `**bold**`, and bare URLs as links. A note with a `folderId` appears only inside that folder, and `archived` notes appear only under Archive. Note writes are also queued in a localStorage outbox and replayed on launch or reconnect, so an offline edit on iOS (memory-only Firestore cache) survives the app being killed.
 
 ---
 
