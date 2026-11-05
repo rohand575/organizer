@@ -4,10 +4,12 @@ export function Checkbox({
   checked,
   onChange,
   accent = '#0A84FF',
+  size = 'md',
 }: {
   checked: boolean
   onChange: () => void
   accent?: string
+  size?: 'sm' | 'md'
 }) {
   return (
     <button
@@ -15,7 +17,9 @@ export function Checkbox({
       onClick={onChange}
       aria-checked={checked}
       role="checkbox"
-      className="press grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 transition-colors"
+      className={`press grid shrink-0 place-items-center rounded-full border-2 transition-colors ${
+        size === 'sm' ? 'h-5 w-5' : 'h-6 w-6'
+      }`}
       style={{
         borderColor: checked ? accent : '#C7C7CC',
         backgroundColor: checked ? accent : 'transparent',
